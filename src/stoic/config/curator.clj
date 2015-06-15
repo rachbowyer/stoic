@@ -37,13 +37,15 @@
   component/Lifecycle
 
   (start [{:keys [client] :as this}]
-    (if client this (assoc this :client (connect))))
+    (if client this (do
+                      (log/info "Connecting to ZK")
+                      (assoc this :client (connect)))))
 
   (stop [{:keys [client] :as this}]
     (when client
       (log/info "Disconnecting from ZK")
       (close client))
-    this)
+    (dissoc this :client))
 
   (fetch [{:keys [client]} k]
     (let [path (path-for root k)]
