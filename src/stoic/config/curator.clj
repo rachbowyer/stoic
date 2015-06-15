@@ -2,7 +2,7 @@
   (:require [curator.framework :refer (curator-framework)]
             [curator.discovery :refer (service-discovery service-instance service-provider instance instances services note-error)]
             [stoic.protocols.config-supplier]
-            [stoic.config.data :refer :all]
+            [stoic.config.data :as data]
             [stoic.config.env :refer :all]
             [com.stuartsierra.component :as component]
             [clojure.tools.logging :as log]
@@ -23,16 +23,16 @@
 (defn add-to-zk [client path m]
   (when-not (.. client checkExists (forPath path))
     (.. client create (forPath path nil)))
-  (.. client setData (forPath path (serialize-form m))))
+  (.. client setData (forPath path (data/serialize-form m))))
 
 (defn read-from-zk [client path]
-  (deserialize-form (.. client getData (forPath path))))
+  (data/deserialize-form (.. client getData (forPath path))))
 
 (defn- watch-path [client path watcher]
   (.. client checkExists watched (usingWatcher watcher)
       (forPath path)))
 
-(defrecord CuratorConfigSupplier [root]
+(defrecord CuratorConfigSupplier [root path-for]
   stoic.protocols.config-supplier/ConfigSupplier
   component/Lifecycle
 
@@ -61,5 +61,9 @@
                         (watcher-fn)
                         (watch-path client path this))))))))
 
-(defn config-supplier []
-  (CuratorConfigSupplier. (zk-root)))
+(defn config-supplier
+  ([path-for]
+   (CuratorConfigSupplier. (zk-root) path-for))
+  ([]
+   (config-supplier data/path-for))
+  )
