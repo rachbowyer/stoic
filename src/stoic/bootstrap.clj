@@ -52,6 +52,8 @@
       (let [stopped-sys-map (component/stop sys-map)]
         (reset! settings-atom settings)
         (-> stopped-sys-map start-safely update-sys-map)))))
+; Return the new restarted stoic-config object
+;(:stoic-config (get-sys-map))
 
 (defn- bounce-components-if-config-changes!
   "Add watchers to config to bounce relevant component if config changes."
@@ -75,6 +77,9 @@
            system (inject-components component-settings system)]
        (bounce-components-if-config-changes!
          get-sys-map update-sys-map config-supplier-component system component-settings)
-       (assoc system :stoic-config config-supplier-component))))
+       ;(assoc system :stoic-config config-supplier-component)
+       {:system system :config-supplier config-supplier-component})))
+
+
 
 

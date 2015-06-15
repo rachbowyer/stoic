@@ -61,8 +61,8 @@
                     :mock (MockComponent.)))
         get-sys-map (fn [] @sys)
         update-sys-map (fn [new-sys-map] (reset! sys new-sys-map))
-        config-supplier (->MockConfigSupplier)
-        unstarted-sys (bs/bootstrap get-sys-map update-sys-map config-supplier)
+        old-config-supplier (->MockConfigSupplier)
+        {unstarted-sys :system config :config-supplier}  (bs/bootstrap get-sys-map update-sys-map old-config-supplier)
         started-sys (bs/start-safely unstarted-sys)]
 
     (update-sys-map started-sys)
@@ -72,11 +72,11 @@
       (assert (= 1 (-> @sys :mock :settings deref :a))))
 
     (testing "Component picks up config changes (and stop is called on started component)"
-      (bump-config (:stoic-config @sys) 2)
+      (bump-config config 2)
       (assert (= 2 (-> @sys :mock :settings deref :a))))
 
     (testing "Restarted component is put back in the map"
-      (bump-config (:stoic-config @sys) 11)
+      (bump-config config 11)
       (assert (= 3 (-> @sys :mock :version))))
 
     (component/stop @sys)))
