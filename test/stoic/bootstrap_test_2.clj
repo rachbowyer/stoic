@@ -10,7 +10,7 @@
   (start [this]
     (println "Config supplier request start")
     (if-not (:is-started this)
-      (let [watch-fn-atom (atom nil)
+      (let [watch-fn-atom (atom '())
             version (atom 1)]
         (println "Not started so starting")
         (assoc this :watch-fn watch-fn-atom :version version :is-started true))
@@ -23,23 +23,28 @@
   ConfigSupplier
   (fetch [{version :version} k]
     (println "ConfigSupplier - fetch " k)
-    (when (= k :mock)
-      {:a @version}))
+    (condp = k
+      :mock {:a @version}
+      :b {}
+      :c {}))
 
     (watch! [this k watcher-function]
       (println "Watching " k watcher-function)
-      (reset! (:watch-fn this) watcher-function)))
+      (swap! (:watch-fn this) (fn [e] (cons watcher-function e)))))
 
 (defn bump-config [stoic-config new-version]
   (reset! (:version stoic-config) new-version)
-  (@(:watch-fn stoic-config)))
+  (doseq [e @(:watch-fn stoic-config)] (e)))
 
 
-(defrecord MockComponent []
+
+(defrecord MockComponent [key log-start log-end]
   component/Lifecycle
 
   (start [this]
-    (assert (not (:is-started this)))
+    (if log-start (swap! log-start (fn [e] (cons key e))))
+
+    (is (not (:is-started this)))
     (println "Component started")
 
     (if-not (:internal-version this)
@@ -52,13 +57,16 @@
         (assoc this :is-started true :version @ref-version))))
 
   (stop [this]
-    (assert (:is-started this))
+    (is (:is-started this))
+    (if log-end (swap! log-end (fn [e] (cons key e))))
     (dissoc this :is-started)))
 
 
 (deftest bounce-components-if-config-changes
   (let [sys (atom (component/system-map
-                    :mock (MockComponent.)))
+                    :mock (MockComponent. :mock nil nil)
+                    :b (component/using (MockComponent. :b nil nil) [:mock])
+                    :c (MockComponent. :c nil nil)))
         get-sys-map (fn [] @sys)
         update-sys-map (fn [new-sys-map] (reset! sys new-sys-map))
         old-config-supplier (->MockConfigSupplier)
@@ -68,18 +76,66 @@
     (update-sys-map started-sys)
 
     (testing "Component injected and started"
-      (assert (-> @sys :mock :is-started))
-      (assert (= 1 (-> @sys :mock :settings deref :a))))
+      (is (-> @sys :mock :is-started))
+      (is (= 1 (-> @sys :mock :settings deref :a))))
 
     (testing "Component picks up config changes (and stop is called on started component)"
       (bump-config config 2)
-      (assert (= 2 (-> @sys :mock :settings deref :a))))
+      (is (= 2 (-> @sys :mock :settings deref :a)))
+      (is (= 2 (-> @sys :b :internal-version deref)))
+      (is (= 1 (-> @sys :c :internal-version deref))))
 
     (testing "Restarted component is put back in the map"
       (bump-config config 11)
-      (assert (= 3 (-> @sys :mock :version))))
+      (is (= 3 (-> @sys :mock :version))))
 
     (component/stop @sys)))
+
+
+(deftest test-transitive-dependents
+  (let [log-start (atom '())
+        log-stop (atom '())
+        sys-map (component/system-map
+                  :a (component/using (MockComponent. :a log-start log-stop) [:b :c])
+                  :b (MockComponent. :b log-start log-stop)
+                  :c (component/using (MockComponent. :c log-start log-stop)  [:d])
+                  :d (MockComponent. :d log-start log-stop)
+                  :e (component/using (MockComponent. :e log-start log-stop)  [:d :f])
+                  :f (MockComponent. :f log-start log-stop))
+
+        system-started (stoic.bootstrap/start-safely sys-map)]
+
+    (testing "Dependencies of roots only consist of the roots themselves"
+        (is (bs/transitive-dependents sys-map :a) #{:a})
+        (is (bs/transitive-dependents sys-map :e) #{:e}))
+
+    (testing "Dependencies of leaf notes includes parents and grand parents"
+      (is (bs/transitive-dependents sys-map :d) #{:a :b :c :d :e}))
+
+
+    (testing "Stop transitive dependencies in the correct order"
+      (reset! log-stop '())
+      (let [system-stopped (bs/transitive-stop-component system-started :d)]
+        (is (= @log-stop (reverse '(:e :a :c :d))))
+        (is (not (-> system-stopped :e :is-started)))
+        (is (not (-> system-stopped :a :is-started)))
+        (is (not (-> system-stopped :c :is-started)))
+        (is (not (-> system-stopped :d :is-started)))
+        (is (-> system-stopped :b :is-started))
+        (is (-> system-stopped :f :is-started))
+        ))
+
+    (testing "Starts transitive dependencies in the correct order"
+      (reset! log-start '())
+      (let [system-started (bs/transitive-start-component sys-map :d)]
+        (is (= @log-start (reverse '(:d :c :a :e))))
+        (is (-> system-started :e :is-started))
+        (is (-> system-started :a :is-started))
+        (is (-> system-started :c :is-started))
+        (is (-> system-started :d :is-started))
+        (is (not (-> system-started :b :is-started)))
+        (is (not (-> system-started :f :is-started)))))))
+
 
 
 
