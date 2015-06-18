@@ -48,20 +48,28 @@
     (dissoc this :client))
 
   (fetch [{:keys [client]} k]
-    (let [path (path-for root k)]
-      (when-not (.. client checkExists (forPath path))
-        (.. client create (forPath path nil)))
-      (read-from-zk client path)))
+    (let [path (path-for root k)
+          fetch-for-path (fn [p]
+                           (when-not (.. client checkExists (forPath p))
+                             (.. client create (forPath p nil)))
+                           (read-from-zk client p))]
+      (if (sequential? path)
+        (apply merge (map fetch-for-path path))
+        (fetch-for-path path))))
 
   (watch! [{:keys [client]} k watcher-fn]
-    (let [path (path-for root k)]
-      (watch-path client path
-                  (reify CuratorWatcher
-                    (process [this event]
-                      (when (= :NodeDataChanged (keyword (.. event getType name)))
-                        (log/info "Data changed, firing watcher" event)
-                        (watcher-fn)
-                        (watch-path client path this))))))))
+    (let [path (path-for root k)
+          watch-one-path (fn [p]
+                           (watch-path client p
+                                       (reify CuratorWatcher
+                                         (process [this event]
+                                           (when (= :NodeDataChanged (keyword (.. event getType name)))
+                                             (log/info "Data changed, firing watcher" event)
+                                             (watcher-fn)
+                                             (watch-path client p this))))))]
+      (if (sequential? path)
+        (apply merge (map watch-one-path path))
+        (watch-one-path path)))))
 
 (defn config-supplier
   ([path-for]

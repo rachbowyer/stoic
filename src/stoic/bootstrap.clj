@@ -96,7 +96,6 @@
            system (inject-components component-settings system)]
        (bounce-components-if-config-changes!
          get-system update-system config-supplier-component system component-settings)
-       ;(assoc system :stoic-config config-supplier-component)
        {:system system :config-supplier config-supplier-component})))
 
 
