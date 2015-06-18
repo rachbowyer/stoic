@@ -45,38 +45,57 @@
           (log/error t "Could not shutdown system")
           system)))))
 
-(defn- bounce-component! [get-sys-map update-sys-map config-supplier k c settings-atom]
+(defn transitive-dependents [system component]
+ "Identifies all components dependent on a specific component and returns
+  this along with the component itself"
+  (let [graph (component/dependency-graph system (keys system))
+        dependents (.transitive-dependents graph component)]
+    (conj dependents component)))
+
+(defn transitive-stop-component [system component]
+  "Stops component and all components that are dependant on it in reverse
+  dependency order."
+  (let [dependents (transitive-dependents system component)]
+    (log/info (str "Stopping components " dependents " in reverse dependency order"))
+    (component/stop-system system dependents)))
+
+(defn transitive-start-component [system component]
+  "Starts component and all components that are dependant on it in
+  dependency order."
+  (let [dependents (transitive-dependents system component)]
+    (log/info (str "Starting components " dependents " in dependency order"))
+    (component/start-system system dependents)))
+
+(defn- bounce-component! [get-system update-system config-supplier k settings-atom]
   (let [settings (cs/fetch config-supplier k)
-        sys-map (get-sys-map)]
+        system (get-system)]
     (when (not= @settings-atom settings)
-      (let [stopped-sys-map (component/stop sys-map)]
+      (let [stopped-system (transitive-stop-component system k)]
         (reset! settings-atom settings)
-        (-> stopped-sys-map start-safely update-sys-map)))))
-; Return the new restarted stoic-config object
-;(:stoic-config (get-sys-map))
+        (update-system (transitive-start-component stopped-system k))))))
 
 (defn- bounce-components-if-config-changes!
   "Add watchers to config to bounce relevant component if config changes."
-  [get-sys-map update-sys-map config-supplier components component-settings]
-  (doseq [[k c] components
+  [get-system update-system config-supplier components component-settings]
+  (doseq [[k _] components
           :let [settings-atom (get component-settings k)]
           :when settings-atom]
     (cs/watch! config-supplier k
-               (partial bounce-component! get-sys-map update-sys-map config-supplier k c settings-atom))))
+               (partial bounce-component! get-system update-system config-supplier k settings-atom))))
 
 (defn bootstrap
   "Inject system with settings fetched from a config-supplier.
    Components will be bounced when their respective settings change.
    Returns a SystemMap with Stoic config attached."
-  ([get-sys-map update-sys-map]
-     (bootstrap get-sys-map update-sys-map (choose-supplier)))
-  ([get-sys-map update-sys-map config-supplier]
-     (let [system (get-sys-map)
+  ([get-system update-system]
+     (bootstrap get-system update-system (choose-supplier)))
+  ([get-system update-system config-supplier]
+     (let [system (get-system)
            config-supplier-component (component/start config-supplier)
            component-settings (fetch-settings config-supplier-component system)
            system (inject-components component-settings system)]
        (bounce-components-if-config-changes!
-         get-sys-map update-sys-map config-supplier-component system component-settings)
+         get-system update-system config-supplier-component system component-settings)
        ;(assoc system :stoic-config config-supplier-component)
        {:system system :config-supplier config-supplier-component})))
 
