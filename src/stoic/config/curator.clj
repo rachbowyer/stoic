@@ -39,6 +39,7 @@
   (start [{:keys [client] :as this}]
     (if client this (do
                       (log/info "Connecting to ZK")
+                      (log/info (str "Zookeeper ips ") (zk-ips))
                       (assoc this :client (connect)))))
 
   (stop [{:keys [client] :as this}]
